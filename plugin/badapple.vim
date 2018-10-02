@@ -3,37 +3,73 @@ if exists('did_badapple_vim') || &cp || version < 700
 endif
 let did_badapple_vim = 1
 
-command BadApple :call s:start()
+command -nargs=? -complete=customlist,BadAppleComplete BadApple
+      \ call s:start('<args>')
+fun BadAppleComplete(A, L, P)
+  return ['version1', 'adjustversion1', 'version1extra', 'clearmemory']
+endf
+
 command BadAppleRestoreGUI :call s:restoreGUI()
 command BadAppleClearMemory :call s:clearMemory()
+command BadAppleAdjust :call s:start('adjustv1')
+
 
 " variables {{{1
+let s:oldguifont=&guifont
+let s:oldlines=&lines
+let s:oldcolumns=&columns
+let s:guifont="monofur for Powerline 4"
+
 let s:DEBUG_ON = 0
-let s:path_head = expand('<sfile>:p:h:h')
-let s:frames = []
-let s:initialized = 0
-
-let s:width = 288
-let s:height = 108
-
-if has('win32')
-  let s:path_v1_music = s:path_head . '\version1\badapple.mp3'
-else
-  let s:path_v1_music = s:path_head . '/version1/badapple.mp3'
-endif
-
 function! IsDebugOn()
   return s:DEBUG_ON
 endfunction
+let s:path_head = expand('<sfile>:p:h:h')
+let s:frames = []
+let s:initialized = 0
+let s:adjust_play=0
+
+let s:width_v1 = 288
+let s:height_v1 = 108
+let s:nr_of_frames_v1 = 6570
+
+if has('win32')
+  let s:path_v1_music = s:path_head . '\version1\badapple.mp3'
+  let s:path_config = s:path_head . '\config'
+  let s:path_log_v1 = s:path_head . '\v1.log'
+else
+  let s:path_v1_music = s:path_head . '/version1/badapple.mp3'
+  let s:path_config = s:path_head . '/config'
+  let s:path_log_v1 = s:path_head . '/v1.log'
+endif
+
+" config
+let s:config = []
+" units: ms
+let s:delay_per_frame = 23
+call add(s:config, s:delay_per_frame)
+let s:play_time = 0
+
+" read s:config and s:delay_per_frame
+if findfile(s:path_config) != ''
+  let s:config = readfile(s:path_config)
+  let s:delay_per_frame = s:config[0]
+else
+  call writefile(s:config, s:path_config)
+endif
 
 " function! s:start() {{{1
-function! s:start()
+function! s:start(mesg)
+  if a:mesg ==# 'clearmemory'
+    call s:clearMemory()
+    return
+  endif
 
   tabnew
 
   setlocal bufhidden=delete
   setlocal nobuflisted
-  "setlocal buftype=nofile
+  setlocal buftype=nofile
   setlocal noswapfile
   setlocal nowrap
   setlocal modifiable
@@ -42,25 +78,34 @@ function! s:start()
   setlocal nonumber
   setlocal norelativenumber
   setlocal cmdheight=1
-  AirlineToggle
-  hi clear
+
   set background=dark
-  winpos 0 0
-  sleep 10m
-  set guifont=monofur\ for\ Powerline\ 4
+  AirlineToggle
+
+  let &guifont=s:guifont
   if !has('gui_running')
     resize 4999
     vertical resize 4999
+  else
+    winpos 0 0
   endif
-  set columns=4999
-  set lines=4999
+  let &columns=s:width_v1
+  let &lines=s:height_v1
 
   while 1
-    call s:dispatchPlay('v1')
+    if a:mesg == ''
+      call s:dispatchPlay('version1')
+    else
+      call s:dispatchPlay(a:mesg)
+    endif
+    let &guifont=s:oldguifont
     let ans = input('Thanks for watching! Do you want to replay(y)?')
     if ans !=# 'y'
       break
     endif
+    let &guifont=s:guifont
+    let &columns=s:width_v1
+    let &lines=s:height_v1
   endwhile
 
   call s:restoreGUI()
@@ -71,43 +116,55 @@ endfunction
 
 " fun s:dispatchPlay(mesg){{{1
 fun! s:dispatchPlay(mesg)
-  if a:mesg ==# 'v1'
+  if a:mesg ==# 'version1'
     call s:PLAY_V1()
-  elseif a:mesg ==# 'v1e'
+  elseif a:mesg ==# 'version1extra'
     call s:PLAY_V1_E()
+  elseif a:mesg ==# 'adjustversion1'
+    call s:adjustV1()
   endif
-  
 endf
-" function! s:PLAY_V1() {{{1
+" function! s:PLAY_V1() (219,140 ms){{{1
 " play the bad apple of version 1
 " 3 minutes 39 seconds (219,140 ms)
 function! s:PLAY_V1()
+  
+  let s:config = readfile(s:path_config)
+  let s:delay_per_frame = s:config[0]
 
   if s:initialized == 0
     let s:initialized = 1
     call s:initializeV1()
   endif
 
+  if !s:adjust_play
+    if IsDebugOn()
+      echom "s:twitchDelay() called"
+    endif
+    call s:twitchDelay(s:play_time)
+  endif
   " play
   call s:playMusic()
+
+  let s:time = localtime()
   call s:play()
+  let s:play_time = localtime() - s:time
+
+
   call s:stopMusic()
 endfunction
 
-" function! s:initializeV1() {{{2
+" function! s:initializeV1() {{{1
 function! s:initializeV1()
   " read file into s:frames
-  for i in range(1, 6570)
-
+  for i in range(1, s:nr_of_frames_v1)
     if has('win32')
       let path = s:path_head . '\version1\_' . string(i) . '.txt'
     else
       let path = s:path_head . '/version1/_' . string(i) . '.txt'
     endif
-
     let frame = readfile(path)
     call add(s:frames, frame)
-
   endfor
 
   " transform s:frames
@@ -115,11 +172,11 @@ function! s:initializeV1()
   "let s:y = 0
   "let columns = getwininfo()[0]['width']
   "let lines = getwininfo()[0]['height']
-  "if columns > s:width
-    "let s:x = (&columns - s:width) / 2
+  "if columns > s:width_v1
+    "let s:x = (&columns - s:width_v1) / 2
   "endif
-  "if lines > s:height
-    "let s:y = (&lines - s:height) / 2
+  "if lines > s:height_v1
+    "let s:y = (&lines - s:height_v1) / 2
   "endif
   "call s:transformFrames(s:x, s:y)
   "echom "BadApple: transform to (" .
@@ -127,7 +184,7 @@ function! s:initializeV1()
         "\ string(s:y) . ") succeed!"
 endfunction
 
-" function! s:play() {{{2
+" function! s:play() {{{1
 " this will play for 217 seconds on my machine
 function! s:play()
   for i in range(len(s:frames))
@@ -135,17 +192,122 @@ function! s:play()
       call setline(ind_row+1, s:frames[i][ind_row])
     endfor
     redraw
-
-    " it is the most suitable value
-    sleep 20m
+    execute "sleep " . s:delay_per_frame . "m"
   endfor
 endfunction
+
+" fun s:twitchDelay(play_time) {{{1
+" this function twitch delay according to delay
+fun s:twitchDelay(play_time)
+  " calculate the delay
+  let delay = s:delay_per_frame
+  " we use linear regression to get the answer
+
+  " load and save the log file
+
+  " if path_log_v1 not created
+  if findfile(s:path_log_v1) == ''
+    return
+  endif
+
+  let log = readfile(s:path_log_v1)
+
+  " delay_per_frame as x, play_time as y
+  " we build linear regression model
+
+  let x = [] | let y = [] | let l1 = []
+  for i in range(0, len(log)-1, 2)
+    call add(x, log[i])
+    call add(l1, 1)
+  endfor
+  for i in range(1, len(log), 2)
+    call add(y, log[i])
+  endfor
+  call assert_equal(len(x), len(y))
+
+  " calculate a and b
+  let n = len(x)
+
+  let denominator = MulSum(x, x) - n * MulAverage(x, l1) * MulAverage(x, l1)
+  if denominator != 0
+
+    let b = (MulSum(x, y) - n * MulAverage(x, l1) * MulAverage(y, l1)) /
+          \ denominator
+    let a = MulAverage(y, l1) - b * MulAverage(x, l1)
+    " calculate delay_per_frame use regression equation y = a + bx
+    " as required y is 219.14s
+    let delay = float2nr(round((219.14 - a) / b))
+  endif
+
+  " save to config
+  let s:delay_per_frame = delay
+  let s:config[0] = s:delay_per_frame
+  call writefile(s:config, s:path_config)
+endf
+
+" fun MulSum(x1, x2) {{{1
+fun MulSum(x1, x2)
+  let res = 0.0
+  for i in range(len(a:x1))
+    res += a:x1[i] * a:x2[i] * 1.0
+  endfor
+  return res
+endf
+" fun MulAverage(x1, x2) {{{1
+fun MulAverage(x1, x2)
+  let res = 0.0
+  for i in range(len(a:x1))
+    res += a:x1[i] * a:x2[i] * 1.0
+  endfor
+  return res / len(a:x1)
+endf
+
+
+" fun s:adjustV1() {{{1
+fun s:adjustV1()
+  let s:adjust_play = 1
+  call s:PLAY_V1()
+  if findfile(s:path_log_v1) == ''
+    if IsDebugOn()
+      echom "file:" . s:path_log_v1 . " not found!"
+    endif
+    call writefile([], s:path_log_v1)
+  endif
+
+  let s:log_v1 = readfile(s:path_log_v1)
+
+  if IsDebugOn()
+    echom "BEFORE add to the list"
+    for i in range(len(s:log_v1))
+      echom s:log_v1[i]
+    endfor
+  endif
+
+  call add(s:log_v1, s:delay_per_frame)
+  call add(s:log_v1, s:play_time)
+
+  if IsDebugOn()
+    echom "AFTER add to the list"
+    for i in range(len(s:log_v1))
+      echom s:log_v1[i]
+    endfor
+  endif
+
+  call writefile(s:log_v1, s:path_log_v1)
+  " reset delay_per_frame to other number
+  " that
+  let random_number = localtime() % 10
+  let random_number = random_number / 2 + 1
+  let s:config[0] = s:config[0] + random_number
+  let s:delay_per_frame = s:config[0]
+  call writefile(s:config, s:path_config)
+endf
 
 " function! s:PLAY_V1_E() {{{1
 function! s:PLAY_V1_E()
 
   call input("ready to play")
-  for i in range(1, 6570)
+  for i in range(1, s:nr_of_frames_v1)
 
     if has('win32')
       let path = s:path_head . '\version1\_' . string(i) . '.txt'
@@ -217,14 +379,11 @@ function! s:clearMemory()
 endfunction
 
 " function! s:restoreGUI() {{{1
-let s:oldguifont=&guifont
-let s:oldlines=&lines
-let s:oldcolumns=&columns
 
 function! s:restoreGUI()
   let &lines = s:oldlines
   let &columns = s:oldcolumns
   let &guifont = s:oldguifont
-  color industry
+  color dracula
 endfunction
 

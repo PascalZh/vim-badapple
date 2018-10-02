@@ -1,4 +1,6 @@
 /version1/
-.swp
-.swn
-.swo
+*.swp
+*.swn
+*.swo
+config
+*.log
