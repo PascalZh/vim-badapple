@@ -3,16 +3,89 @@ if exists('did_badapple_vim') || &cp || version < 700
 endif
 let did_badapple_vim = 1
 
-command -nargs=? -complete=customlist,BadAppleComplete BadApple
-      \ call s:start('<args>')
+command -nargs=?
+      \ -complete=customlist,BadAppleComplete BadApple
+      \ -count=1
+      \ call s:decorate_start('<args>', <count>)
 fun BadAppleComplete(A, L, P)
-  return ['version1', 'adjustversion1', 'version1extra', 'clearmemory']
+  return ['version1', 'adjustversion1', 'version1extra', 'clearmemory', 'restoregui']
 endf
 
-command BadAppleRestoreGUI :call s:restoreGUI()
-command BadAppleClearMemory :call s:clearMemory()
-command BadAppleAdjust :call s:start('adjustv1')
+" func s:ReadConfig() {{{1
+func s:ReadConfig()
+if findfile(s:path_config) != ''
+  let s:config_list = readfile(s:path_config)
+  for i in range(len(s:config_list))
+    let temp = split(s:config_list[i], ':')
+    if match(temp[1], '^\<[-0-9]\{1,}\>$') == 0
+      let s:config[temp[0]] = str2nr(temp[1])
+    else
+      let s:config[temp[0]] = temp[1]
+    endif
+  endfor
+else
+  if IsDebugOn()
+    echom "DEBUG(BadApple) call into s:writeconfig()"
+  endif
+  call s:writeconfig()
+endif
+endfunc
 
+" fun s:WriteConfig(key, value) {{{1
+fun s:WriteConfig(key, value)
+  call s:ReadConfig()
+  let s:config[a:key] = a:value
+  call s:writeconfig()
+endf
+fun s:writeconfig()
+  let temp = []
+  let keys_ = keys(s:config)
+  let values_ = values(s:config)
+  for i in range(len(keys_))
+    if match(values_[i], '^<[-0-9]\{1,}\>$') == 0
+      call add(temp, keys_[i] . ':' . string(values_[i]))
+    else
+      call add(temp, keys_[i] . ':' . values_[i])
+    endif
+  endfor
+  if IsDebugOn()
+    echom 'DEBUG(BadApple) variable: s:writeconfig()::temp'
+    echom string(temp)
+  endif
+  call writefile(temp, s:path_config)
+endf
+" }}}
+" fun s:Log(list, file) {{{1
+fun s:Log(list, file)
+  let list = a:list
+  if a:file == s:path_log_v1
+    if len(list) == 2
+      let list[0] = 'delay(x): ' . string(list[0])
+            \ . ' | ' . 'playtime(y): ' . string(list[1])
+            \ . ' | ' . strftime("20%y.%m.%d %R")
+      unlet list[1]
+    endif
+  endif
+  call writefile(list, file, "a")
+endf
+
+" fun s:ReadLog(path) {{{1
+fun s:ReadLog(path)
+  let ret = []
+  let list = readfile(path)
+  if a:path == s:path_log_v1
+    for i in range(len(list))
+      let n1 = matchstr(ret[i], '\<\d*\>', 2)
+      let n2 = matchstr(ret[i], '\<\d*\>', 1)
+      call add(ret, n1)
+      call add(ret, n2)
+    endfor
+  endif
+  if IsDebugOn()
+    echom string(ret)
+  endif
+  return ret
+endf
 
 " variables {{{1
 let s:oldguifont=&guifont
@@ -20,11 +93,11 @@ let s:oldlines=&lines
 let s:oldcolumns=&columns
 let s:guifont="monofur for Powerline 4"
 
-let s:DEBUG_ON = 0
+let s:DEBUG_ON = 1
 function! IsDebugOn()
   return s:DEBUG_ON
 endfunction
-let s:path_head = expand('<sfile>:p:h:h')
+
 let s:frames = []
 let s:initialized = 0
 let s:adjust_play=0
@@ -33,6 +106,7 @@ let s:width_v1 = 288
 let s:height_v1 = 108
 let s:nr_of_frames_v1 = 6570
 
+let s:path_head = expand('<sfile>:p:h:h')
 if has('win32')
   let s:path_v1_music = s:path_head . '\version1\badapple.mp3'
   let s:path_config = s:path_head . '\config'
@@ -44,24 +118,32 @@ else
 endif
 
 " config
-let s:config = []
+let s:config = {}
 " units: ms
-let s:delay_per_frame = 23
-call add(s:config, s:delay_per_frame)
-let s:play_time = 0
+let s:config.delay_per_frame = 23
+let s:config.play_time = 0
+" The configure option show above are the default values.
+" They will be modified by config file.
+" Or if there is not a config file, it(ReadConfig) will just create
 
-" read s:config and s:delay_per_frame
-if findfile(s:path_config) != ''
-  let s:config = readfile(s:path_config)
-  let s:delay_per_frame = s:config[0]
-else
-  call writefile(s:config, s:path_config)
-endif
+" }}}
+
+" fun s:decorate_start(mesg, count) {{{1
+fun s:decorate_start(mesg, count)
+  for i in range(a:count)
+    call s:start(a:mesg)
+  endfor
+  
+endf
 
 " function! s:start() {{{1
 function! s:start(mesg)
   if a:mesg ==# 'clearmemory'
     call s:clearMemory()
+    return
+  endif
+  if a:mesg == 'restoregui'
+    call s:restoreGUI()
     return
   endif
 
@@ -84,13 +166,17 @@ function! s:start(mesg)
 
   let &guifont=s:guifont
   if !has('gui_running')
-    resize 4999
-    vertical resize 4999
+    if exists("+lines") && exists("+columns")
+      let &columns=s:width_v1
+      let &lines=s:height_v1
+    endif
+    execute "resize " . s:width_v1
+    execute "vertical resize " . s:height_v1
   else
     winpos 0 0
+    let &columns=s:width_v1
+    let &lines=s:height_v1
   endif
-  let &columns=s:width_v1
-  let &lines=s:height_v1
 
   while 1
     if a:mesg == ''
@@ -116,6 +202,8 @@ endfunction
 
 " fun s:dispatchPlay(mesg){{{1
 fun! s:dispatchPlay(mesg)
+  call s:ReadConfig()
+
   if a:mesg ==# 'version1'
     call s:PLAY_V1()
   elseif a:mesg ==# 'version1extra'
@@ -124,34 +212,33 @@ fun! s:dispatchPlay(mesg)
     call s:adjustV1()
   endif
 endf
+" }}}
+
 " function! s:PLAY_V1() (219,140 ms){{{1
 " play the bad apple of version 1
 " 3 minutes 39 seconds (219,140 ms)
 function! s:PLAY_V1()
-  
-  let s:config = readfile(s:path_config)
-  let s:delay_per_frame = s:config[0]
-
   if s:initialized == 0
     let s:initialized = 1
     call s:initializeV1()
   endif
 
   if !s:adjust_play
-    if IsDebugOn()
-      echom "s:twitchDelay() called"
-    endif
-    call s:twitchDelay(s:play_time)
+    call s:twitchDelay()
   endif
+
   " play
   call s:playMusic()
 
-  let s:time = localtime()
+  let time = localtime()
   call s:play()
-  let s:play_time = localtime() - s:time
-
+  let play_time = localtime() - time
 
   call s:stopMusic()
+
+  if !s:adjust_play
+    call s:Log([s:config.delay_per_frame, play_time], s:path_log_v1)
+  endif
 endfunction
 
 " function! s:initializeV1() {{{1
@@ -192,25 +279,23 @@ function! s:play()
       call setline(ind_row+1, s:frames[i][ind_row])
     endfor
     redraw
-    execute "sleep " . s:delay_per_frame . "m"
+    execute "sleep " . s:config["delay_per_frame"] . "m"
   endfor
 endfunction
 
 " fun s:twitchDelay(play_time) {{{1
 " this function twitch delay according to delay
-fun s:twitchDelay(play_time)
+fun s:twitchDelay()
   " calculate the delay
-  let delay = s:delay_per_frame
+  let delay = s:config.delay_per_frame
   " we use linear regression to get the answer
-
-  " load and save the log file
 
   " if path_log_v1 not created
   if findfile(s:path_log_v1) == ''
     return
   endif
 
-  let log = readfile(s:path_log_v1)
+  let log = s:ReadLog(s:path_log_v1)
 
   " delay_per_frame as x, play_time as y
   " we build linear regression model
@@ -240,9 +325,7 @@ fun s:twitchDelay(play_time)
   endif
 
   " save to config
-  let s:delay_per_frame = delay
-  let s:config[0] = s:delay_per_frame
-  call writefile(s:config, s:path_config)
+  call s:WriteConfig("delay_per_frame", delay)
 endf
 
 " fun MulSum(x1, x2) {{{1
@@ -267,41 +350,17 @@ endf
 fun s:adjustV1()
   let s:adjust_play = 1
   call s:PLAY_V1()
-  if findfile(s:path_log_v1) == ''
-    if IsDebugOn()
-      echom "file:" . s:path_log_v1 . " not found!"
-    endif
-    call writefile([], s:path_log_v1)
-  endif
+  call s:Log([s:config.delay_per_frame, s:config.play_time], s:path_log_v1)
 
-  let s:log_v1 = readfile(s:path_log_v1)
-
-  if IsDebugOn()
-    echom "BEFORE add to the list"
-    for i in range(len(s:log_v1))
-      echom s:log_v1[i]
-    endfor
-  endif
-
-  call add(s:log_v1, s:delay_per_frame)
-  call add(s:log_v1, s:play_time)
-
-  if IsDebugOn()
-    echom "AFTER add to the list"
-    for i in range(len(s:log_v1))
-      echom s:log_v1[i]
-    endfor
-  endif
-
-  call writefile(s:log_v1, s:path_log_v1)
   " reset delay_per_frame to other number
   " that
   let random_number = localtime() % 10
   let random_number = random_number / 2 + 1
-  let s:config[0] = s:config[0] + random_number
-  let s:delay_per_frame = s:config[0]
-  call writefile(s:config, s:path_config)
+  let value = s:config.delay_per_frame + random_number
+  call s:WriteConfig("delay_per_frame", value)
 endf
+
+" }}}
 
 " function! s:PLAY_V1_E() {{{1
 function! s:PLAY_V1_E()
@@ -324,6 +383,8 @@ function! s:PLAY_V1_E()
   endfor
 
 endfunction
+" }}}
+
 " function! s:playMusic() {{{1
 function! s:playMusic()
 pythonx << EOF
