@@ -1,8 +1,8 @@
 
-" func s:ReadConfig() {{{1
+" func s:LoadConfig() !!!NEVER BE CALLED SINCE YOU HAVE SEE THIS{{{1
 " ':' is not allowed in the config file
 " value should be number or string(better not to mix them)
-func s:ReadConfig()
+func s:LoadConfig()
   if findfile(s:path_config) != ''
     let s:config_list = readfile(s:path_config)
     for i in range(len(s:config_list))
@@ -23,7 +23,7 @@ endfunc
 
 " fun s:WriteConfig(key, value) {{{1
 fun s:WriteConfig(key, value)
-  call s:ReadConfig()
+  call s:LoadConfig()
   let s:config[a:key] = a:value
   call s:writeconfig()
 endf
@@ -40,7 +40,7 @@ fun s:writeconfig()
   endfor
   if IsDebugOn()
     echom 'DEBUG(BadApple) variable: s:writeconfig()::temp'
-    echom string(temp)
+    echom "'" . string(temp) . "'"
   endif
   call writefile(temp, s:path_config)
 endf
@@ -62,6 +62,7 @@ fun s:Log(list, file)
             \ . ' | ' . 'distribution of x: ' . list[2]
             \ . ' | ' . strftime("20%y.%m.%d %R")
       unlet list[1]
+      unlet list[1]
     endif
   endif
 
@@ -71,19 +72,21 @@ endf
 " fun s:ReadLog(path) {{{1
 fun s:ReadLog(path)
   let ret = []
-  let list = readfile(path)
+  let list = readfile(a:path)
 
   if a:path == s:path_log_v1
     for i in range(len(list))
-      let n1 = matchstr(ret[i], '\<\d*\>', 2)
-      let n2 = matchstr(ret[i], '\<\d*\>', 1)
+      let l = split(list[i], '|')
+      let n1 = str2nr(matchstr(l[0], '\<\d*\>'))
+      let n2 = str2nr(matchstr(l[1], '\<\d*\>'))
       call add(ret, n1)
       call add(ret, n2)
     endfor
   endif
 
   if IsDebugOn()
-    echom string(ret)
+    echom "ReadLog()::ret:"
+    echom "'".string(ret)."'"
   endif
 
   return ret
@@ -96,8 +99,9 @@ let s:oldguifont=&guifont
 let s:oldlines=&lines
 let s:oldcolumns=&columns
 let s:guifont="monofur for Powerline 4"
+let s:airlinetoggleon=0
 
-let s:DEBUG_ON = 0
+let s:DEBUG_ON = 1
 function! IsDebugOn()
   return s:DEBUG_ON
 endfunction
@@ -129,7 +133,7 @@ let s:config.delay_per_frame = 23
 let s:config.delay_per_frame_for_adjust = 23
 " The configure option show above are the default values.
 " They will be modified by config file.
-" Or if there is not a config file, it(ReadConfig) will just create
+" Or if there is not a config file, it(LoadConfig) will just create
 
 let s:play_time = 0
 " }}}
@@ -153,7 +157,7 @@ endf
 " function! s:start() {{{1
 function! s:start(mesg)
   if a:mesg ==# 'clearmemory'
-    call s:clearMemory()
+    call s:clearMemory(0)
     return
   endif
   if a:mesg == 'restoregui'
@@ -174,9 +178,15 @@ function! s:start(mesg)
   setlocal nonumber
   setlocal norelativenumber
   setlocal cmdheight=1
+  let s:oldguifont=&guifont
+  let s:oldlines=&lines
+  let s:oldcolumns=&columns
 
   set background=dark
+  if exists(':AirlineToggle')
   AirlineToggle
+  let s:airlinetoggleon=0
+  endif
 
   let &guifont=s:guifont
   if !has('gui_running')
@@ -187,7 +197,7 @@ function! s:start(mesg)
     execute "resize " . s:width_v1
     execute "vertical resize " . s:height_v1
   else
-    winpos 0 0
+    "winpos 0 0
     let &columns=s:width_v1
     let &lines=s:height_v1
   endif
@@ -218,14 +228,18 @@ function! s:start(mesg)
   endwhile
 
   call s:restoreGUI()
-  AirlineToggle
+  if exists(':AirlineToggle')
+    AirlineToggle
+    let s:airlinetoggleon = 1
+    AirlineRefresh
+  endif
   bwipeout
 
 endfunction
 
 " fun s:dispatchPlay(mesg){{{1
 fun! s:dispatchPlay(mesg)
-  call s:ReadConfig()
+  call s:LoadConfig()
 
   if a:mesg ==# 'version1'
     call s:PLAY_V1()
@@ -234,6 +248,8 @@ fun! s:dispatchPlay(mesg)
   elseif a:mesg ==# 'adjustversion1'
     call s:adjustV1()
   endif
+
+  call s:clearMemory(1)
 endf
 " }}}
 
@@ -247,6 +263,9 @@ function! s:PLAY_V1()
   endif
 
   call s:twitchDelay()
+  if s:adjust_play
+    let s:config.delay_per_frame = s:config.delay_per_frame_for_adjust
+  endif
 
   " play
   call s:playMusic()
@@ -335,7 +354,10 @@ fun s:twitchDelay()
   let n = len(x)
 
   let denominator = MulSum(x, x) - n * MulAverage(x, l1) * MulAverage(x, l1)
-  if denominator != 0
+  if IsDebugOn()
+    echom 'twitchDelay::denominator' . string(denominator)
+  endif
+  if denominator > 0
 
     let b = (MulSum(x, y) - n * MulAverage(x, l1) * MulAverage(y, l1)) /
           \ denominator
@@ -343,6 +365,9 @@ fun s:twitchDelay()
     " calculate delay_per_frame use regression equation y = a + bx
     " as required y is 219.14s
     let delay = float2nr(round((219.14 - a) / b))
+    if IsDebugOn()
+      echom 'twitchDelay::delay:' . string(delay)
+    endif
   endif
 
   " save to config
@@ -353,7 +378,7 @@ endf
 fun MulSum(x1, x2)
   let res = 0.0
   for i in range(len(a:x1))
-    res += a:x1[i] * a:x2[i] * 1.0
+    let res += a:x1[i] * a:x2[i] * 1.0
   endfor
   return res
 endf
@@ -361,7 +386,7 @@ endf
 fun MulAverage(x1, x2)
   let res = 0.0
   for i in range(len(a:x1))
-    res += a:x1[i] * a:x2[i] * 1.0
+    let res += a:x1[i] * a:x2[i] * 1.0
   endfor
   return res / len(a:x1)
 endf
@@ -369,22 +394,24 @@ endf
 
 " fun s:adjustV1() {{{1
 fun s:adjustV1()
-
   let s:adjust_play=1
   call s:PLAY_V1()
   let s:adjust_play=0
 
   call s:Log([s:config.delay_per_frame, s:play_time, 'Gaussian dist'], s:path_log_v1)
-
   " set config.delay_per_frame_for_adjust
   " the delay(x) follow a Gaussian distribution
   let random_number = localtime() % 10
   let random_number = random_number - 5
 
   let value = s:config.delay_per_frame_for_adjust + random_number
-  call s:WriteConfig("delay_per_frame_for_adjust", value)
-
+  if value < 0
+    let value = 0
+  elseif value > 50
+    let value = 50
   endif
+
+  call s:WriteConfig("delay_per_frame_for_adjust", value)
 endf
 
 " }}}
@@ -392,7 +419,18 @@ endf
 " function! s:PLAY_V1_E() {{{1
 function! s:PLAY_V1_E()
 
-  call input("ready to play")
+  let &lines = s:oldlines
+  let &columns = s:oldcolumns
+  let &guifont = s:oldguifont
+  let ans = input('Have closed other file in the vim?(y for yes)')
+  let &guifont=s:guifont
+  let &columns=s:width_v1
+  let &lines=s:height_v1
+
+  if ans != 'y'
+    return
+  endif
+  call s:playMusic()
   for i in range(1, s:nr_of_frames_v1)
 
     if has('win32')
@@ -403,17 +441,29 @@ function! s:PLAY_V1_E()
 
     execute "read " . path
 
+    setlocal nowrap
+    setlocal buftype=nofile
+    setlocal mousehide
+    setlocal noswapfile
+    setlocal noruler
+    setlocal nonumber
+    setlocal norelativenumber
+
     redraw
-    sleep 20m
-    redraw
-    bdelete!
+    sleep 21m
+    bwipeout
   endfor
+  call s:stopMusic()
 
 endfunction
 " }}}
 
 " function! s:playMusic() {{{1
 function! s:playMusic()
+  if !has('python3')
+    return
+  endif
+  
 python3 << EOF
 import vim
 import pygame
@@ -426,6 +476,9 @@ endfunction
 
 " function! s:stopMusic() {{{1
 function! s:stopMusic()
+  if !has('python3')
+    return
+  endif
   python3 pygame.mixer.music.stop()
 endfunction
 
@@ -460,12 +513,14 @@ function! Mstr(str, i)
 endfunction
 
 " function! s:clearMemory() {{{1
-function! s:clearMemory()
+function! s:clearMemory(mute)
   for i in range(len(s:frames))
-    unlet s:frames[i]
+    unlet s:frames[0]
   endfor
   let s:initialized=0
-  echom "BadApple clear memory succeed!"
+  if !a:mute
+    echom "BadApple clear memory succeed!"
+  endif
 endfunction
 
 " function! s:restoreGUI() {{{1
@@ -474,12 +529,18 @@ function! s:restoreGUI()
   let &lines = s:oldlines
   let &columns = s:oldcolumns
   let &guifont = s:oldguifont
+  if exists(':AirlineToggle')
+    if !s:airlinetoggleon
+      AirlineToggle
+      AirlineRefresh
+    endif
+  endif
   color dracula
 endfunction
 
 " fun s:InteractiveInterface() {{{1
 fun s:InteractiveInterface()
-  let ret = input('Thanks for watching! Do you want to replay(y)?')
+  let ret = input('Thanks for watching! Do you want to replay(y for yes)?')
   return ret
 endf
 

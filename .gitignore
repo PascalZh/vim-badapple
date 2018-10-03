@@ -4,3 +4,4 @@
 *.swo
 config
 *.log
+test*
