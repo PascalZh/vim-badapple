@@ -3,32 +3,62 @@ if exists('did_badapple_vim') || &cp || version < 700
 endif
 let did_badapple_vim = 1
 
-command -nargs=?
-      \ -complete=customlist,BadAppleComplete BadApple
+command! -nargs=?
+      \ -complete=customlist,BadAppleComplete
       \ -count=1
+      \ BadApple
       \ call s:decorate_start('<args>', <count>)
+
+" fun BadAppleComplete(A, L, P) {{{1
 fun BadAppleComplete(A, L, P)
-  return ['version1', 'adjustversion1', 'version1extra', 'clearmemory', 'restoregui']
+  " candidate:
+  " adjustversion1
+  " clearmemory
+  " restoregui
+  " version1
+  " version1extra
+  if len(a:A) == 0
+    return ['adjustversion1', 'clearmemory', 'restoregui'
+          \ , 'version1', 'version1extra']
+  endif
+
+  if match('adjustversion1',  '^' . a:A) == 0
+    return ['adjustversion1']
+
+  elseif match('clearmemory', '^' . a:A) == 0
+    return ['clearmemory']
+
+  elseif match('restoregui', '^' . a:A) == 0
+    return ['restoregui']
+
+  elseif match('version1', '^' . a:A) == 0
+    return ['version1', 'version1extra']
+  elseif match('version1extra', '^' . a:A) == 0
+    return ['version1extra']
+
+  endif
 endf
 
 " func s:ReadConfig() {{{1
+" ':' is not allowed in the config file
+" value should be number or string(better not to mix them)
 func s:ReadConfig()
-if findfile(s:path_config) != ''
-  let s:config_list = readfile(s:path_config)
-  for i in range(len(s:config_list))
-    let temp = split(s:config_list[i], ':')
-    if match(temp[1], '^\<[-0-9]\{1,}\>$') == 0
-      let s:config[temp[0]] = str2nr(temp[1])
-    else
-      let s:config[temp[0]] = temp[1]
+  if findfile(s:path_config) != ''
+    let s:config_list = readfile(s:path_config)
+    for i in range(len(s:config_list))
+      let temp = split(s:config_list[i], ':')
+      if match(temp[1], '^\<[-0-9]\{1,}\>$') == 0
+        let s:config[temp[0]] = str2nr(temp[1])
+      else
+        let s:config[temp[0]] = temp[1]
+      endif
+    endfor
+  else
+    if IsDebugOn()
+      echom "DEBUG(BadApple) call into s:writeconfig()"
     endif
-  endfor
-else
-  if IsDebugOn()
-    echom "DEBUG(BadApple) call into s:writeconfig()"
+    call s:writeconfig()
   endif
-  call s:writeconfig()
-endif
 endfunc
 
 " fun s:WriteConfig(key, value) {{{1
@@ -58,6 +88,7 @@ endf
 " fun s:Log(list, file) {{{1
 fun s:Log(list, file)
   let list = a:list
+
   if a:file == s:path_log_v1
     if len(list) == 2
       let list[0] = 'delay(x): ' . string(list[0])
@@ -66,13 +97,15 @@ fun s:Log(list, file)
       unlet list[1]
     endif
   endif
-  call writefile(list, file, "a")
+
+  call writefile(list, a:file, "a")
 endf
 
 " fun s:ReadLog(path) {{{1
 fun s:ReadLog(path)
   let ret = []
   let list = readfile(path)
+
   if a:path == s:path_log_v1
     for i in range(len(list))
       let n1 = matchstr(ret[i], '\<\d*\>', 2)
@@ -81,9 +114,11 @@ fun s:ReadLog(path)
       call add(ret, n2)
     endfor
   endif
+
   if IsDebugOn()
     echom string(ret)
   endif
+
   return ret
 endf
 
@@ -93,7 +128,7 @@ let s:oldlines=&lines
 let s:oldcolumns=&columns
 let s:guifont="monofur for Powerline 4"
 
-let s:DEBUG_ON = 1
+let s:DEBUG_ON = 0
 function! IsDebugOn()
   return s:DEBUG_ON
 endfunction
@@ -101,6 +136,7 @@ endfunction
 let s:frames = []
 let s:initialized = 0
 let s:adjust_play=0
+let s:no_interaction = 0
 
 let s:width_v1 = 288
 let s:height_v1 = 108
@@ -121,15 +157,23 @@ endif
 let s:config = {}
 " units: ms
 let s:config.delay_per_frame = 23
-let s:config.play_time = 0
 " The configure option show above are the default values.
 " They will be modified by config file.
 " Or if there is not a config file, it(ReadConfig) will just create
 
+let s:play_time = 0
 " }}}
 
 " fun s:decorate_start(mesg, count) {{{1
 fun s:decorate_start(mesg, count)
+  if a:count > 1
+    let s:no_interaction = 1
+  elseif a:count == 1
+    let s:no_interaction = 0
+  else
+    echom "BadApple(error) count can't be less than 1"
+    return
+  endif
   for i in range(a:count)
     call s:start(a:mesg)
   endfor
@@ -185,13 +229,22 @@ function! s:start(mesg)
       call s:dispatchPlay(a:mesg)
     endif
     let &guifont=s:oldguifont
-    let ans = input('Thanks for watching! Do you want to replay(y)?')
-    if ans !=# 'y'
-      break
+
+    if s:no_interaction == 0
+      let ans = s:InteractiveInterface()
+      if ans !=# 'y'
+        break
+      endif
     endif
+
     let &guifont=s:guifont
     let &columns=s:width_v1
     let &lines=s:height_v1
+
+    if s:no_interaction == 1
+      break
+    endif
+
   endwhile
 
   call s:restoreGUI()
@@ -232,12 +285,12 @@ function! s:PLAY_V1()
 
   let time = localtime()
   call s:play()
-  let play_time = localtime() - time
+  let s:play_time = localtime() - time
 
   call s:stopMusic()
 
   if !s:adjust_play
-    call s:Log([s:config.delay_per_frame, play_time], s:path_log_v1)
+    call s:Log([s:config.delay_per_frame, s:play_time], s:path_log_v1)
   endif
 endfunction
 
@@ -350,7 +403,7 @@ endf
 fun s:adjustV1()
   let s:adjust_play = 1
   call s:PLAY_V1()
-  call s:Log([s:config.delay_per_frame, s:config.play_time], s:path_log_v1)
+  call s:Log([s:config.delay_per_frame, s:play_time], s:path_log_v1)
 
   " reset delay_per_frame to other number
   " that
@@ -447,4 +500,10 @@ function! s:restoreGUI()
   let &guifont = s:oldguifont
   color dracula
 endfunction
+
+" fun s:InteractiveInterface() {{{1
+fun s:InteractiveInterface()
+  let ret = input('Thanks for watching! Do you want to replay(y)?')
+  return ret
+endf
 
