@@ -16,6 +16,5 @@
 # TODO List
 * 用户交互界面的优化
 * 修复：播放音乐偶尔会失效
-* 将代码迁移到autoload
 * version1extra的开发（为了解决version1内存占用很大的问题）
 * 使用python进行播放数据的统计分析（现采用vimscript进行线性回归分析）
