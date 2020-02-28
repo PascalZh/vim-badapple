@@ -6,7 +6,7 @@ let did_badapple_vim = 1
 command! -nargs=?
       \ -complete=customlist,BadAppleComplete
       \ -count=1
-      \ BadApple
+      \ ZBadApple
       \ call badapple#decorate_start('<args>', <count>)
 
 fun BadAppleComplete(A, L, P)
